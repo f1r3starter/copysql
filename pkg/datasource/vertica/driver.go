@@ -1,6 +1,7 @@
 package vertica
 
 import (
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"io"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/oleh-ozimok/copysql/pkg/datasource"
 
-	_ "github.com/vertica/vertica-sql-go"
+	"github.com/vertica/vertica-sql-go"
 )
 
 const driverName = "vertica"
@@ -58,8 +59,16 @@ func (d *Driver) Open() (err error) {
 	return
 }
 
-func (*Driver) CopyFrom(r io.Reader, table string) error {
-	panic("not implemented")
+func (d *Driver) CopyFrom(r io.Reader, table string) error {
+	vCtx := vertigo.NewVerticaContext(context.Background())
+	err := vCtx.SetCopyInputStream(r)
+	if err != nil {
+		return err
+	}
+
+	_, err = d.connection.ExecContext(vCtx, "COPY "+table+" FROM STDIN DELIMITER ','")
+
+	return err
 }
 
 func (d *Driver) CopyTo(w io.Writer, query string) error {
