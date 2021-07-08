@@ -1,6 +1,8 @@
 package clickhouse
 
 import (
+	"database/sql"
+	"encoding/csv"
 	"io"
 
 	"github.com/mitchellh/mapstructure"
@@ -10,9 +12,12 @@ import (
 
 	_ "github.com/mailru/go-clickhouse"
 	"github.com/pkg/errors"
+
+	"github.com/oleh-ozimok/copysql/pkg/datasource"
 )
 
 const driverName = "clickhouse"
+const maxLength = 100 // todo: remove this dirty hack after driver refactor
 
 func init() {
 	datasource.Register(driverName, &detectorFactory{})
@@ -68,8 +73,39 @@ func (d *Driver) CopyFrom(r io.Reader, table string) error {
 	return query.Exec(d.cluster.ActiveConn())
 }
 
-func (*Driver) CopyTo(w io.Writer, query string) error {
-	panic("not implemented")
+func (d *Driver) CopyTo(w io.Writer, query string) error {
+	iter := clickhouse.NewQuery(query).Iter(d.cluster.ActiveConn())
+
+	if iter.Error() != nil {
+		return iter.Error()
+	}
+
+	readColumns := make([]interface{}, maxLength)
+	writeColumns := make([]sql.NullString, maxLength)
+
+	for i := range writeColumns {
+		readColumns[i] = &writeColumns[i]
+	}
+
+	record := make([]string, maxLength)
+
+	csvWriter := csv.NewWriter(w)
+	csvWriter.UseCRLF = true
+
+	for iter.Scan(readColumns...) {
+		for i := range writeColumns {
+			record[i] = writeColumns[i].String
+		}
+
+		err := csvWriter.Write(record)
+		if err != nil {
+			return err
+		}
+	}
+
+	csvWriter.Flush()
+
+	return iter.Error()
 }
 
 func (d *Driver) Close() error {
